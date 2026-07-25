@@ -120,6 +120,11 @@ def main():
     ap.add_argument("--capture", required=True)
     ap.add_argument("--site", default=".")
     ap.add_argument("--omissions")
+    ap.add_argument(
+        "--transcriptions",
+        help="transcriptions.json from find_text_images.py: text you read out of "
+        "images, enforced here like any other source block",
+    )
     ap.add_argument("--min-chars", type=int, default=25)
     ap.add_argument("--threshold", type=float, default=0.72)
     ap.add_argument("--report", default="coverage_report.md")
@@ -135,7 +140,7 @@ def main():
     omit_norms = [(normalize(o.get("match", "")), o.get("reason", "")) for o in omit_text]
     omit_files = {o.get("file", ""): o.get("reason", "") for o in omit_images}
 
-    results = {"verbatim": [], "paraphrased": [], "missing": [], "omitted": []}
+    results = {"verbatim": [], "paraphrased": [], "missing": [], "omitted": [], "image_text": []}
     missing_images, orphan_images, omitted_images = [], [], []
     seen_hashes = set()
 
@@ -167,6 +172,26 @@ def main():
                     {"file": img["file"], "page": page["slug"], "alt": img.get("alt", ""), "url": img["source_url"]}
                 )
 
+    # Text that only ever existed as pixels. The inventory cannot contain it, so
+    # it is checked from the transcriptions file instead.
+    untranscribed, missing_image_text = [], []
+    if args.transcriptions and os.path.exists(args.transcriptions):
+        with open(args.transcriptions, encoding="utf-8") as fh:
+            entries = json.load(fh).get("images", [])
+        for entry in entries:
+            kind = (entry.get("kind") or "").strip().lower()
+            text = (entry.get("text") or "").strip()
+            if not kind:
+                untranscribed.append(entry.get("file", "?"))
+                continue
+            if kind != "content" or not text:
+                continue
+            status, ratio = classify(text, corpus, corpus_words, args.threshold)
+            record = {"file": entry.get("file", "?"), "text": text, "ratio": round(ratio, 2)}
+            # Hard failure rather than a percentage: this text exists nowhere else
+            # in machine-readable form, so nothing downstream can catch its loss.
+            (results["image_text"] if status != "missing" else missing_image_text).append(record)
+
     for digest, paths in site_hashes.items():
         for rel in paths:
             if "capture" in rel.split(os.sep):
@@ -189,10 +214,35 @@ def main():
         f"| Text coverage | **{text_cov:.1%}** ({len(results['verbatim'])} verbatim, "
         f"{len(results['paraphrased'])} reworded, {len(results['missing'])} missing) |",
         f"| Image coverage | **{img_cov:.1%}** ({img_total - len(missing_images)}/{img_total} unique images carried over) |",
+        f"| Text recovered from images | {len(results['image_text'])} transcribed block(s) placed |",
         f"| Declared omissions | {len(results['omitted'])} text, {len(omitted_images)} images |",
         f"| Unreferenced files in build | {len(orphan_images)} |",
         "",
     ]
+
+    if missing_image_text:
+        lines += [
+            "## Text read out of images but not placed in the build",
+            "",
+            "This text exists only as pixels on the source site. If it is not in the "
+            "rebuild it is gone, and no other check can detect that.",
+            "",
+        ]
+        for item in missing_image_text:
+            lines.append(f"- `{item['file']}` (overlap {item['ratio']}) — {item['text'][:240]}")
+        lines.append("")
+
+    if untranscribed:
+        lines += [
+            "## Flagged images not yet reviewed",
+            "",
+            "Open each of these and set `kind` (content/decorative) in transcriptions.json. "
+            "Text that exists only as pixels cannot be detected any other way.",
+            "",
+        ]
+        for f in untranscribed:
+            lines.append(f"- `{f}`")
+        lines.append("")
 
     if results["missing"]:
         lines += ["## Missing text — place these or declare them in omissions.json", ""]
@@ -234,9 +284,15 @@ def main():
 
     print(f"Text coverage:  {text_cov:.1%}  ({len(results['missing'])} missing blocks)")
     print(f"Image coverage: {img_cov:.1%}  ({len(missing_images)} missing images)")
+    if results["image_text"]:
+        print(f"Image-text:     {len(results['image_text'])} transcribed block(s) placed")
+    if missing_image_text:
+        print(f"IMAGE-TEXT:     {len(missing_image_text)} transcribed block(s) MISSING from the build")
+    if untranscribed:
+        print(f"UNREVIEWED:     {len(untranscribed)} flagged image(s) still need a kind/text decision")
     print(f"Report: {args.report}")
 
-    if text_cov < args.fail_under or missing_images:
+    if text_cov < args.fail_under or missing_images or untranscribed or missing_image_text:
         print("\nFAIL: content is still unaccounted for. Place it or declare it in omissions.json.")
         return 1
     print("\nPASS: all source content accounted for.")

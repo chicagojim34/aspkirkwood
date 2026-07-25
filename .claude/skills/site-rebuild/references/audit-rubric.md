@@ -69,7 +69,7 @@ Fast identification of what you're dealing with, and what it implies:
 |---|---|
 | `<table>` used for layout, spacer GIFs | Hand-built pre-2010; content is trapped in markup, crawl carefully |
 | iWeb / FrontPage / Dreamweaver generator tags | Abandoned toolchain, owner cannot edit it at all |
-| Text rendered as images (`shapeimage_1.png`) | Invisible to search and screen readers; **retype the text by hand from the image** |
+| Text rendered as images (`shapeimage_1.png`) | Invisible to search and screen readers; run `find_text_images.py`, read each hit, transcribe the ones carrying content (step 2b) |
 | Frames or framesets | Crawler will miss pages; enumerate frame `src` targets manually |
 | Flash/Silverlight embeds | Content is simply gone; ask the owner for the originals |
 | Everything on one long homepage | Needs splitting into an IA, not just restyling |
@@ -77,9 +77,20 @@ Fast identification of what you're dealing with, and what it implies:
 | A `mailto:` as the only contact method | Add tappable phone and a clear location block |
 
 The image-of-text case deserves special attention: old site builders like iWeb rendered headings
-and even paragraphs as PNGs. `crawl_site.py` downloads them but cannot read them. Open those images
-and transcribe the text into the rebuild — otherwise the new site silently loses content that the
-coverage check cannot detect, because it was never text in the first place.
+and even whole paragraphs as PNGs. `crawl_site.py` downloads those files but has no way to know
+what they say, so the content inventory — and therefore the coverage check — has no record of that
+text existing.
+
+Closing the gap is step 2b of the workflow: run `find_text_images.py` to rank the candidates, then
+open each one and read it. Sort them into text that carries information (transcribe it into real
+HTML) and text that *is* artwork — a logo, a wordmark, a stylized "Live. Laugh. Love." — which
+needs no transcription beyond good `alt` text. That judgment is why the script ranks rather than
+decides.
+
+For the audit itself, count how much of the site's real content is trapped this way and name it in
+the findings. A business whose address, hours, and phone number exist only as pixels is invisible
+to search for its own name and city, and unusable to anyone on a screen reader — a concrete
+consequence the owner will understand.
 
 ## Sector expectations
 

@@ -98,6 +98,35 @@ If the crawler is blocked (egress policy, bot protection, a JS-only site), say s
 the user how to get the content rather than rebuilding from guesses. A JS-rendered site may need
 a headless browser; a blocked host is a policy decision that is not yours to route around.
 
+### 2b. Recover the text that is locked inside images
+
+Old site builders — iWeb, FrontPage, Flash exporters — rendered headings, addresses, price lists,
+and whole paragraphs as image files. That text is invisible to search engines, to screen readers,
+and to the content inventory, so it is the one category of content the coverage check cannot
+notice going missing. It is also often the most important text on the page.
+
+```bash
+python3 scripts/find_text_images.py --capture capture/ --out transcriptions.json
+```
+
+This ranks every captured image by how likely it is to be a picture of text, using format, bytes
+per pixel (flat text compresses far harder than photographs), aspect ratio, and filename tells.
+It deliberately does not decide anything — **open each flagged file with the Read tool and look at
+it.** Then fill in each entry:
+
+- `"kind": "content"` with the text typed out verbatim — a heading, an address, a phone number,
+  a price list, a paragraph. This becomes real HTML in the rebuild.
+- `"kind": "decorative"` with empty text — logos, wordmarks, a stylized "Live. Laugh. Love."
+  flourish, builder badges like "Made with EverWeb". Nothing to transcribe, though a wordmark's
+  words usually belong in the image's `alt` text.
+
+The distinction is a judgment call about whether the words carry information or are themselves the
+artwork, which is exactly why a human-or-model read beats a heuristic. Expect false positives in
+the ranking — a low-contrast scanned photograph scores much like a text render.
+
+Anything you mark as content is enforced in step 6, so transcribe carefully: a mistyped phone
+number is worse than no phone number.
+
 ### 3. Plan the information architecture
 
 Write `plan.md` mapping every source page to a destination:
@@ -151,11 +180,16 @@ clickable.
 ### 6. Verify — do not skip this
 
 ```bash
-python3 scripts/check_coverage.py --capture capture/ --site . --omissions omissions.json
+python3 scripts/check_coverage.py --capture capture/ --site . \
+  --omissions omissions.json --transcriptions transcriptions.json
 ```
 
 It reports the share of source text blocks present in your build (verbatim or reworded) and the
 share of source images carried over by content hash, and it fails if anything is unaccounted for.
+Passing `--transcriptions` folds step 2b into the same contract: any image text you marked as
+content must appear in the build, and any flagged image you never gave a verdict on fails the run.
+Both are hard failures rather than percentage points, because that text exists nowhere else in
+machine-readable form — if it is dropped, nothing downstream can tell you.
 For each item it flags, either place the content or add it to `omissions.json` with a reason:
 
 ```json
@@ -205,7 +239,9 @@ worst-scoring sites in sectors where you can reuse a design direction. Keep a si
 - `references/delivery.md` — GitHub Pages deploy, single-file bundling for Wix/Squarespace import,
   image weight budgets, and the handoff summary format. Read at step 7.
 - `scripts/crawl_site.py` — capture pages, images, and a content inventory.
-- `scripts/check_coverage.py` — verify nothing was dropped.
+- `scripts/find_text_images.py` — rank images by how likely they are to be pictures of text, so
+  you know which to open and transcribe.
+- `scripts/check_coverage.py` — verify nothing was dropped, transcribed image text included.
 - `scripts/bundle_singlefile.py` — inline a page into one portable HTML file.
 - `assets/starter/style.css`, `assets/starter/main.js` — token-driven stylesheet and interactions.
 
